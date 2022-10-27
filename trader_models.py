@@ -53,9 +53,10 @@ class SRUTrader(PreTrainedModel):
         )
         
         logits = self.logits(hidden)
-
+        
         soft_trade = F.softmax(logits.reshape(batch_size, seq_len, 60, 2), dim = -1)
         soft_trade = (soft_trade * self.trade_sign).sum(dim = -1)
+        soft_profit = soft_trade * future
         
         if future is None:
             return soft_trade
