@@ -1,2 +1,2 @@
 # Trader
-Personal stock modeling repo
+Personal forex modeling repo
