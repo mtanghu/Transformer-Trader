@@ -56,7 +56,7 @@ class CausalConvolution(nn.Module):
 
 
 class SGConvConfig(PretrainedConfig):
-    model_type = "SRUTrader"
+    model_type = "SGConvTrader"
     def __init__(self, n_embd = 256, n_head = 8, hidden_dropout_prob = .1,
                  initializer_range = None):
         super().__init__(
@@ -151,6 +151,9 @@ class SGConvTrader(PreTrainedModel):
         
         if labels is None:
             return soft_trade
+        
+        # clean up soft trades for ignored labels (i.e. for overnight trades) 
+        soft_trade = torch.where(labels.long() != -100, soft_trade, 0)
                 
         ce_loss = self.ce_loss(logits.reshape(-1, num_cuts), labels.long().reshape(-1))
         loss = ce_loss
