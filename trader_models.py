@@ -70,7 +70,9 @@ class SGConvConfig(PretrainedConfig):
 class SGConvBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.mega_prenorm = nn.LayerNorm(config.n_embd)
+        self.pre_gconv = nn.Sequential(
+            nn.LayerNorm(config.n_embd), nn.Linear(config.n_embd, config.n_embd)
+        )
         self.gconv_layer = GConv(
                 d_model=config.n_embd,
                 d_state=64,
@@ -88,7 +90,7 @@ class SGConvBlock(nn.Module):
 
 
     def forward(self, mod):
-        mod = self.gconv_layer(self.mega_prenorm(mod))[0] + mod # residual
+        mod = self.gconv_layer(self.pre_gconv(mod))[0] + mod # residual
         
         residual = mod
         
@@ -155,15 +157,15 @@ class SGConvTrader(PreTrainedModel):
         # clean up soft trades for ignored labels (i.e. for overnight trades) 
         soft_trade = torch.where(labels.long() != -100, soft_trade, 0)
                 
-        ce_loss = self.ce_loss(logits.reshape(-1, num_cuts), labels.long().reshape(-1))
-        loss = ce_loss
+        # ce_loss = self.ce_loss(logits.reshape(-1, num_cuts), labels.long().reshape(-1))
+        # loss = ce_loss
         
-#         labels = F.one_hot(labels.long(), num_cuts)
-#         loss = .1 * ce_loss + self.l1(probas.reshape(-1, num_cuts), labels.reshape(-1, num_cuts))
-
         # lq loss
-#         q = .2
-#         loss = ((1 - (probas * labels).sum(dim = -1) ** q) / q).mean()
+        q = .2
+        clean_labels = torch.where(labels != -100, labels, 0)
+        clean_labels = F.one_hot(clean_labels.long(), num_cuts)
+        loss = ((1 - (probas * clean_labels).sum(dim = -1) ** q) / q)
+        loss = torch.where(labels != -100, loss, 0).mean()
         
         soft_profit = soft_trade * future
         return {
