@@ -142,10 +142,15 @@ class SGConvTrader(PreTrainedModel):
         down_prob = down_probs.sum(dim = -1)
         up_prob = up_probs.sum(dim = -1)
         
+        assert torch.allclose(up_prob + down_prob, torch.ones(up_prob.shape).to(up_prob))
+        
         outcome_expectation = probas * eur_usd_medians
         risks, rewards = outcome_expectation.chunk(2, dim = -1)
-        risk = -(risks.sum(dim = -1) / down_prob)
-        reward = (rewards.sum(dim = -1) / up_prob)
+        risk = -risks.sum(dim = -1) / down_prob
+        reward = rewards.sum(dim = -1) / up_prob
+                
+        assert (risk >= 0).all()
+        assert (reward >= 0).all()
         
         buy_kelly = up_prob - (1 - up_prob) / (reward / risk)
         sell_kelly = down_prob - (1 - down_prob) / (risk / reward)
