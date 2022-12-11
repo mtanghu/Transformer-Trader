@@ -120,6 +120,8 @@ class SGConvTrader(PreTrainedModel):
         self.layers = nn.ModuleList([SGConvBlock(config) for _ in range(n_layer)])
         
         self.logits = nn.Linear(config.n_embd, num_periods * num_cuts, bias = False)
+        
+        self.trade = nn.Linear(config.n_embd, num_periods, bias = False)
 
         self.ce_loss = nn.CrossEntropyLoss()
         
@@ -137,24 +139,26 @@ class SGConvTrader(PreTrainedModel):
             hidden = layer(embed)
         logits = self.logits(hidden)
         
+        soft_trade = torch.tanh(self.trade(hidden))
+        
         probas = F.softmax(logits.reshape(batch_size, seq_len, num_periods, num_cuts), dim = -1)
-        down_probs, up_probs = probas.chunk(2, dim = -1)
-        down_prob = down_probs.sum(dim = -1)
-        up_prob = up_probs.sum(dim = -1)
+#         down_probs, up_probs = probas.chunk(2, dim = -1)
+#         down_prob = down_probs.sum(dim = -1)
+#         up_prob = up_probs.sum(dim = -1)
         
-        assert torch.allclose(up_prob + down_prob, torch.ones(up_prob.shape).to(up_prob))
+#         assert torch.allclose(up_prob + down_prob, torch.ones(up_prob.shape).to(up_prob))
         
-        outcome_expectation = probas * eur_usd_medians
-        risks, rewards = outcome_expectation.chunk(2, dim = -1)
-        risk = -risks.sum(dim = -1) / down_prob
-        reward = rewards.sum(dim = -1) / up_prob
+#         outcome_expectation = probas * eur_usd_medians
+#         risks, rewards = outcome_expectation.chunk(2, dim = -1)
+#         risk = -risks.sum(dim = -1) / down_prob
+#         reward = rewards.sum(dim = -1) / up_prob
                 
-        assert (risk >= 0).all()
-        assert (reward >= 0).all()
+#         assert (risk >= 0).all()
+#         assert (reward >= 0).all()
         
-        buy_kelly = up_prob - (1 - up_prob) / (reward / risk)
-        sell_kelly = down_prob - (1 - down_prob) / (risk / reward)
-        soft_trade = torch.where(buy_kelly > sell_kelly, buy_kelly, -sell_kelly)
+#         buy_kelly = up_prob - (1 - up_prob) / (reward / risk)
+#         sell_kelly = down_prob - (1 - down_prob) / (risk / reward)
+#         soft_trade = torch.where(buy_kelly > sell_kelly, buy_kelly, -sell_kelly)
         
         if labels is None:
             return soft_trade
@@ -169,8 +173,20 @@ class SGConvTrader(PreTrainedModel):
         q = .2
         clean_labels = torch.where(labels != -100, labels, 0)
         clean_labels = F.one_hot(clean_labels.long(), num_cuts)
-        loss = ((1 - (probas * clean_labels).sum(dim = -1) ** q) / q)
-        loss = torch.where(labels != -100, loss, 0).mean()
+        classification_loss = ((1 - (probas * clean_labels).sum(dim = -1) ** q) / q)
+        classification_loss = torch.where(labels != -100, classification_loss, 0).mean()
+        
+        std_future = future / future.std(dim = 1).unsqueeze(1)
+        std_profit = soft_trade * std_future
+        
+        gains = std_profit[std_profit > 0]
+        losses = -std_profit[std_profit < 0]
+        trade_loss = -torch.log(gains + 1).mean() + torch.log(losses + 1).mean()
+        
+        # push losses uniformly to other side
+        # push_loss = soft_trade[std_profit < 0].abs().mean()
+        
+        loss = trade_loss#+ .1 * push_loss# + classification_loss
         
         soft_profit = soft_trade * future
         return {
