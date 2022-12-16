@@ -12,7 +12,7 @@ import math
 import pandas as pd
 
 
-num_features = 5
+num_features = 4
 num_periods = 9
 num_cuts = 10
 
@@ -57,12 +57,13 @@ class CausalConvolution(nn.Module):
 
 class SGConvConfig(PretrainedConfig):
     model_type = "SGConvTrader"
-    def __init__(self, n_embd = 256, n_head = 8, hidden_dropout_prob = .1,
-                 initializer_range = None):
+    def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = .1,
+                 kernel_size = 5, initializer_range = None):
         super().__init__(
             n_embd = n_embd,
             n_head = n_head,
-            hidden_dropout_prob = hidden_dropout_prob
+            hidden_dropout_prob = hidden_dropout_prob,
+            kernel_size = kernel_size
         )
         
         
@@ -110,7 +111,8 @@ class SGConvTrader(PreTrainedModel):
         super().__init__(config)
                 
         self.conv_embed = CausalConvolution(
-            input_size = num_features, hidden_size = config.n_embd, kernel_size = num_features
+            input_size = num_features, hidden_size = config.n_embd,
+            kernel_size = config.kernel_size
         )
         
         n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2)
@@ -180,13 +182,11 @@ class SGConvTrader(PreTrainedModel):
         std_profit = soft_trade * std_future
         
         gains = std_profit[std_profit > 0]
-        losses = -std_profit[std_profit < 0]
-        trade_loss = -torch.log(gains + 1).mean() + torch.log(losses + 1).mean()
-        
+        losses = -2 * std_profit[std_profit < 0]
         # push losses uniformly to other side
         # push_loss = soft_trade[std_profit < 0].abs().mean()
         
-        loss = trade_loss#+ .1 * push_loss# + classification_loss
+        loss = losses.sum() / gains.sum()
         
         soft_profit = soft_trade * future
         return {
