@@ -12,6 +12,8 @@ import math
 import numpy as np
 
 
+
+# globals
 num_features = 4
 num_periods = 9
 
@@ -168,12 +170,16 @@ class SGConvTrader(PreTrainedModel):
         soft_trade = torch.where(labels.long() != -100, soft_trade, 0)
         
         std_future = future / future.std(dim = 1).unsqueeze(1)
+    
         std_profit = soft_trade * std_future
         
         gains = std_profit[std_profit > 0]
-        losses = -2 * std_profit[std_profit < 0]
+        losses = -std_profit[std_profit <= 0]
         
-        loss = losses.sum() / gains.sum()
+        loss = (2 * losses + .2).sum() / (gains + .1).sum()
+
+        # scale_factor = torch.clamp(std_profit.detach(), min = -4, max = None)
+        # loss = (-.2 * std_profit / (1 + .2 * scale_factor)).mean()
         
         soft_profit = soft_trade * future
         return {
