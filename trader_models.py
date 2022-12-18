@@ -154,7 +154,7 @@ class SGConvTrader(PreTrainedModel):
         pass
 
 
-    def forward(self, ohlcv, labels = None, future = None):
+    def forward(self, ohlcv, future = None, overnight_masks = None):
         batch_size, seq_len, _ = ohlcv.shape
         
         embed = self.conv_embed(ohlcv)
@@ -163,11 +163,11 @@ class SGConvTrader(PreTrainedModel):
         
         soft_trade = self.trade(hidden)
         
-        if labels is None:
+        if future is None:
             return soft_trade
         
-        # clean up soft trades for ignored labels (i.e. for overnight trades) 
-        soft_trade = torch.where(labels.long() != -100, soft_trade, 0)
+        # clean up soft trades to get rid of overnight trades
+        soft_trade = torch.where(overnight_masks.long() != 1, soft_trade, 0)
         
         std_future = future / future.std(dim = 1).unsqueeze(1)
     
