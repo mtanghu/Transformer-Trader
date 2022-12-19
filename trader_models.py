@@ -73,9 +73,16 @@ class SoftTrade(nn.Module):
         logits = self.proj_logits(mod).reshape(
             batch_size, length, num_periods, self.num_levels
         )
-        probas = F.softmax(logits, dim = -1)
+        # probas = F.softmax(logits, dim = -1)
+        probas = self.elu_softmax(logits, dim = -1)
         
         return (probas * self.linspace).sum(dim = -1)
+
+
+    def elu_softmax(self, logits, dim = -1):
+        positive = (F.elu(logits) + 1)
+        probas = positive / positive.sum(dim = dim, keepdim = True)
+        return probas
 
 
 
@@ -154,8 +161,9 @@ class SGConvTrader(PreTrainedModel):
         pass
 
 
-    def forward(self, ohlcv, future = None, overnight_masks = None):
+    def forward(self, ohlcv, labels = None, overnight_masks = None):
         batch_size, seq_len, _ = ohlcv.shape
+        future = labels # rename for readability
         
         embed = self.conv_embed(ohlcv)
         for layer in self.layers:
@@ -167,16 +175,20 @@ class SGConvTrader(PreTrainedModel):
             return soft_trade
         
         # clean up soft trades to get rid of overnight trades
-        soft_trade = torch.where(overnight_masks.long() != 1, soft_trade, 0)
+        if overnight_masks is not None:
+            soft_trade = torch.where(overnight_masks.long() != 1, soft_trade, 0)
         
         std_future = future / future.std(dim = 1).unsqueeze(1)
     
         std_profit = soft_trade * std_future
         
-        gains = std_profit[std_profit > 0]
-        losses = -std_profit[std_profit <= 0]
+        # calculate this way for numerical stability
+        loss = -std_profit.mean() / (soft_trade.abs().mean())
         
-        loss = (2 * losses + .2).sum() / (gains + .1).sum()
+#         gains = std_profit[std_profit > 0]
+#         losses = -std_profit[std_profit <= 0]
+        
+#         loss = (2 * losses + .2).sum() / (gains + .1).sum()
 
         # scale_factor = torch.clamp(std_profit.detach(), min = -4, max = None)
         # loss = (-.2 * std_profit / (1 + .2 * scale_factor)).mean()
