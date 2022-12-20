@@ -57,27 +57,23 @@ class CausalConvolution(nn.Module):
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
-
-        assert (num_levels + 1) % 2 == 0, "the number of tradeable levels should be odd"
         self.num_levels = num_levels
         
-        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels)
-        self.linspace = nn.Parameter(
-            torch.tensor(np.linspace(-1, 1, num_levels)),
-            requires_grad = False
-        )
+        self.proj_signal = nn.Linear(hidden_size, num_periods * num_levels)
+        self.proj_gate = nn.Linear(hidden_size, num_periods * num_levels)
 
 
-    def forward(self, mod):
-        batch_size, length, _ = mod.shape
-        logits = self.proj_logits(mod).reshape(
-            batch_size, length, num_periods, self.num_levels
-        )
-        # probas = F.softmax(logits, dim = -1)
-        probas = self.elu_softmax(logits, dim = -1)
+    def forward(self, hidden_state):
+        batch_size, length, _ = hidden_state.shape
         
-        return (probas * self.linspace).sum(dim = -1)
-
+        signals = torch.tanh(self.proj_signal(hidden_state).reshape(
+            batch_size, length, num_periods, self.num_levels
+        ))
+        gates = torch.sigmoid(self.proj_gate(hidden_state).reshape(
+            batch_size, length, num_periods, self.num_levels
+        ))
+        
+        return (signals * gates).sum(dim = -1) / self.num_levels
 
     def elu_softmax(self, logits, dim = -1):
         positive = (F.elu(logits) + 1)
@@ -191,6 +187,10 @@ class SGConvTrader(PreTrainedModel):
         )
         floored_profit = soft_profit * adjustment
         
+        # apply commission fee to floored profit (3% is 6 pips at 500x leverage)
+        floored_profit = floored_profit - soft_trade.abs() * .03
+        
+        # negative log return loss function (i.e. growth maximization) 
         loss = -torch.log(1 + soft_profit).mean()
         
         return {
