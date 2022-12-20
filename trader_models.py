@@ -89,13 +89,16 @@ class SoftTrade(nn.Module):
 class SGConvConfig(PretrainedConfig):
     model_type = "SGConvTrader"
     def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = .1,
-                 kernel_size = 5, num_levels = 41, initializer_range = None):
+                 kernel_size = 5, num_levels = 41, max_loss = .9,
+                 initializer_range = None):
         super().__init__(
             n_embd = n_embd,
             n_head = n_head,
             hidden_dropout_prob = hidden_dropout_prob,
             kernel_size = kernel_size,
-            num_levels = num_levels
+            num_levels = num_levels,
+            max_loss = max_loss,
+            initializer_range = initializer_range
         )
         
         
@@ -141,6 +144,7 @@ class SGConvTrader(PreTrainedModel):
     
     def __init__(self, config):
         super().__init__(config)
+        self.max_loss = config.max_loss
                 
         self.conv_embed = CausalConvolution(
             input_size = num_features, hidden_size = config.n_embd,
@@ -155,7 +159,7 @@ class SGConvTrader(PreTrainedModel):
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
 
-        
+
     def _init_weights(self, module):
         # just for loading model
         pass
@@ -176,24 +180,19 @@ class SGConvTrader(PreTrainedModel):
         
         # clean up soft trades to get rid of overnight trades
         if overnight_masks is not None:
-            soft_trade = torch.where(overnight_masks.long() != 1, soft_trade, 0)
-        
-        std_future = future / future.std(dim = 1).unsqueeze(1)
-    
-        std_profit = soft_trade * std_future
-        
-        # calculate this way for numerical stability
-        loss = -std_profit.mean() / (soft_trade.abs().mean())
-        
-#         gains = std_profit[std_profit > 0]
-#         losses = -std_profit[std_profit <= 0]
-        
-#         loss = (2 * losses + .2).sum() / (gains + .1).sum()
-
-        # scale_factor = torch.clamp(std_profit.detach(), min = -4, max = None)
-        # loss = (-.2 * std_profit / (1 + .2 * scale_factor)).mean()
+            mask = torch.where(overnight_masks.long() != 1, 1, 0)
+            soft_trade = soft_trade * mask
         
         soft_profit = soft_trade * future
+
+        # floor losses (so that the log can operate correctly), notice detach
+        adjustment = torch.where(
+            soft_profit > -self.max_loss, 1, -self.max_loss / soft_profit.detach()
+        )
+        floored_profit = soft_profit * adjustment
+        
+        loss = -torch.log(1 + soft_profit).mean()
+        
         return {
             'loss': loss,
             'profits': soft_profit,
