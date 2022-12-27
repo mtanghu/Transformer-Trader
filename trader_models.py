@@ -187,7 +187,7 @@ class SGConvTrader(PreTrainedModel):
         )
         floored_profit = soft_profit * adjustment
         
-        # apply commission fee to floored profit (3% is 6 pips at 500x leverage)
+        # apply commission fee to floored profit (3% is .6 pips at 500x leverage)
         floored_profit = floored_profit - soft_trade.abs() * .03
         
         # negative log return loss function (i.e. growth maximization) 
