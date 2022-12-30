@@ -75,6 +75,7 @@ class SoftTrade(nn.Module):
         
         return (signals * gates).sum(dim = -1) / self.num_levels
 
+
     def elu_softmax(self, logits, dim = -1):
         positive = (F.elu(logits) + 1)
         probas = positive / positive.sum(dim = dim, keepdim = True)
@@ -188,7 +189,7 @@ class SGConvTrader(PreTrainedModel):
         floored_profit = soft_profit * adjustment
         
         # apply commission fee to floored profit (3% is .6 pips at 500x leverage)
-        floored_profit = floored_profit - soft_trade.abs() * .03
+        # floored_profit = floored_profit - soft_trade.abs() * .03
         
         # negative log return loss function (i.e. growth maximization) 
         loss = -torch.log(1 + soft_profit).mean()
