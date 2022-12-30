@@ -8,6 +8,7 @@ Current ideas:
 - debugging, should really have assert statements to ensure code is working correctly
 - higher learning rates? With the current gating, I have to imagine very little gradient is passing
 - interleaving with possibly a restarts learning rate schedule
+- I am interested in trying a LEAP approach
 
 
 Improving my process:
