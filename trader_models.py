@@ -25,7 +25,7 @@ class CausalConvolution(nn.Module):
         self.kernel_size = kernel_size
         self.in_conv = nn.Conv1d(
             input_size, hidden_size, kernel_size = kernel_size,
-            padding = 0, bias = True
+            padding = 0, bias = False
         )
         
         self.gelu = nn.GELU()
@@ -59,8 +59,8 @@ class SoftTrade(nn.Module):
         super().__init__()
         self.num_levels = num_levels
         
-        self.proj_signal = nn.Linear(hidden_size, num_periods * num_levels)
-        self.proj_gate = nn.Linear(hidden_size, num_periods * num_levels)
+        self.proj_signal = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
+        self.proj_gate = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
 
 
     def forward(self, hidden_state):
@@ -74,12 +74,6 @@ class SoftTrade(nn.Module):
         ))
         
         return (signals * gates).sum(dim = -1) / self.num_levels
-
-
-    def elu_softmax(self, logits, dim = -1):
-        positive = (F.elu(logits) + 1)
-        probas = positive / positive.sum(dim = dim, keepdim = True)
-        return probas
 
 
 
@@ -104,7 +98,7 @@ class SGConvBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.pre_gconv = nn.Sequential(
-            nn.LayerNorm(config.n_embd), nn.Linear(config.n_embd, config.n_embd)
+            nn.LayerNorm(config.n_embd), nn.Linear(config.n_embd, config.n_embd, bias = False)
         )
         self.gconv_layer = GConv(
                 d_model=config.n_embd,
@@ -117,9 +111,9 @@ class SGConvBlock(nn.Module):
         )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd)
-        self.Wgates = nn.Linear(config.n_embd, config.n_embd*4)
-        self.Wvalues = nn.Linear(config.n_embd, config.n_embd*4)
-        self.proj = nn.Linear(config.n_embd*4, config.n_embd)
+        self.Wgates = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
+        self.Wvalues = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
+        self.proj = nn.Linear(config.n_embd*4, config.n_embd, bias = False)
 
 
     def forward(self, mod):
@@ -153,6 +147,7 @@ class SGConvTrader(PreTrainedModel):
         print(f'Using {n_layer} layers')
         
         self.layers = nn.ModuleList([SGConvBlock(config) for _ in range(n_layer)])
+        self.final_norm = nn.LayerNorm(config.n_embd)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
 
@@ -169,6 +164,7 @@ class SGConvTrader(PreTrainedModel):
         embed = self.conv_embed(ohlcv)
         for layer in self.layers:
             hidden = layer(embed)
+        hidden = self.final_norm(hidden)
         
         soft_trade = self.trade(hidden)
         
