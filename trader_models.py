@@ -98,7 +98,8 @@ class SGConvBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.pre_gconv = nn.Sequential(
-            nn.LayerNorm(config.n_embd), nn.Linear(config.n_embd, config.n_embd, bias = False)
+            nn.LayerNorm(config.n_embd, elementwise_affine = False),
+            nn.Linear(config.n_embd, config.n_embd, bias = False)
         )
         self.gconv_layer = GConv(
                 d_model=config.n_embd,
@@ -110,7 +111,7 @@ class SGConvBlock(nn.Module):
                 transposed=False
         )
         
-        self.ff_prenorm = nn.LayerNorm(config.n_embd)
+        self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         self.Wgates = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
         self.Wvalues = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
         self.proj = nn.Linear(config.n_embd*4, config.n_embd, bias = False)
@@ -147,7 +148,7 @@ class SGConvTrader(PreTrainedModel):
         print(f'Using {n_layer} layers')
         
         self.layers = nn.ModuleList([SGConvBlock(config) for _ in range(n_layer)])
-        self.final_norm = nn.LayerNorm(config.n_embd)
+        self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
 
