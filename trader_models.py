@@ -14,7 +14,7 @@ import numpy as np
 
 
 # globals
-num_features = 4
+num_features = 5
 num_periods = 9
 
 
