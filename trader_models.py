@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
 from rotary_embedding_torch import RotaryEmbedding
-from sru import SRUpp
 from gconv_standalone import GConv
 from mega_pytorch import MegaLayer
 
@@ -16,6 +15,7 @@ import numpy as np
 # globals
 num_features = 5
 num_periods = 9
+num_classes = 64
 
 
 
@@ -45,7 +45,7 @@ class CausalConvolution(nn.Module):
         
         # unpermute
         mod = mod.permute(0, 2, 1)
-                
+        
         mod = self.gelu(mod)
         
         mod = self.out_proj(mod)
@@ -151,6 +151,9 @@ class SGConvTrader(PreTrainedModel):
         self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
+        self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
+
+        self.classification_loss = nn.CrossEntropyLoss()
 
 
     def _init_weights(self, module):
@@ -158,7 +161,7 @@ class SGConvTrader(PreTrainedModel):
         pass
 
 
-    def forward(self, ohlcv, labels = None, overnight_masks = None):
+    def forward(self, ohlcv, labels = None, overnight_masks = None, classes = None):
         batch_size, seq_len, _ = ohlcv.shape
         future = labels # rename for readability
         
@@ -189,8 +192,13 @@ class SGConvTrader(PreTrainedModel):
         # floored_profit = floored_profit - soft_trade.abs() * .03
         
         # negative log return loss function (i.e. growth maximization) 
-        loss = -torch.log(1 + soft_profit).mean()
-        
+        trade_loss = -torch.log(1 + soft_profit).mean()
+
+        logits = self.logits(hidden)
+        class_loss = self.classification_loss(logits.reshape(-1, num_classes), classes.long().reshape(-1))
+    
+        loss = trade_loss + class_loss
+
         return {
             'loss': loss,
             'profits': soft_profit,
