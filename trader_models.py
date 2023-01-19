@@ -183,16 +183,20 @@ class SGConvTrader(PreTrainedModel):
         soft_profit = soft_trade * future
 
         # floor losses (so that the log can operate correctly), notice detach
-        adjustment = torch.where(
+        # also ceiling the gains for symmetry
+        floor_mask = torch.where(
             soft_profit > -self.max_loss, 1, -self.max_loss / soft_profit.detach()
         )
-        floored_profit = soft_profit * adjustment
+        ceiling_mask =  torch.where(
+            soft_profit < self.max_loss, 1, self.max_loss / soft_profit.detach()
+        )
+        capped_profit = soft_profit * floor_mask * ceiling_mask        
         
         # apply commission fee to floored profit (3% is .6 pips at 500x leverage)
         # floored_profit = floored_profit - soft_trade.abs() * .03
         
         # negative log return loss function (i.e. growth maximization) 
-        trade_loss = -torch.log(1 + soft_profit).mean()
+        trade_loss = -torch.log(1 + capped_profit).mean()
 
         logits = self.logits(hidden)
         class_loss = self.classification_loss(logits.reshape(-1, num_classes), classes.long().reshape(-1))
