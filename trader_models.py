@@ -54,6 +54,13 @@ class CausalConvolution(nn.Module):
 
 
 
+def sigmoid_softmax(logits, dim = -1):
+    positive = torch.sigmoid(logits)
+    probas = positive / positive.sum(dim = dim, keepdim = True)
+    return probas
+
+
+
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
@@ -73,15 +80,9 @@ class SoftTrade(nn.Module):
         logits = self.proj_logits(mod).reshape(
             batch_size, length, num_periods, self.num_levels
         )
-        probas = self.sigmoid_softmax(logits, dim = -1)
+        probas = sigmoid_softmax(logits, dim = -1)
         
         return (probas * self.linspace).sum(dim = -1)
-
-
-    def sigmoid_softmax(self, logits, dim = -1):
-        positive = torch.sigmoid(logits)
-        probas = positive / positive.sum(dim = dim, keepdim = True)
-        return probas
 
 
 
@@ -161,7 +162,7 @@ class SGConvTrader(PreTrainedModel):
         self.trade = SoftTrade(config.n_embd, config.num_levels)
         self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
 
-        self.classification_loss = nn.CrossEntropyLoss()
+        self.classification_loss = nn.NLLLoss()
 
 
     def _init_weights(self, module):
@@ -206,8 +207,12 @@ class SGConvTrader(PreTrainedModel):
         # negative log return loss function (i.e. growth maximization) 
         trade_loss = -torch.log(1 + capped_profit).mean()
 
+        # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
-        class_loss = self.classification_loss(logits.reshape(-1, num_classes), classes.long().reshape(-1))
+        class_loss = self.classification_loss(
+            torch.log(sigmoid_softmax(logits.reshape(-1, num_classes))),
+            classes.long().reshape(-1)
+        )
     
         loss = trade_loss + class_loss
 
