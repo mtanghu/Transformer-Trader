@@ -57,23 +57,31 @@ class CausalConvolution(nn.Module):
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
+
+        assert (num_levels + 1) % 2 == 0, "the number of tradeable levels should be odd"
         self.num_levels = num_levels
         
-        self.proj_signal = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
-        self.proj_gate = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
+        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels)
+        self.linspace = nn.Parameter(
+            torch.tensor(np.linspace(-1, 1, num_levels)),
+            requires_grad = False
+        )
 
 
-    def forward(self, hidden_state):
-        batch_size, length, _ = hidden_state.shape
-        
-        signals = torch.tanh(self.proj_signal(hidden_state).reshape(
+    def forward(self, mod):
+        batch_size, length, _ = mod.shape
+        logits = self.proj_logits(mod).reshape(
             batch_size, length, num_periods, self.num_levels
-        ))
-        gates = torch.sigmoid(self.proj_gate(hidden_state).reshape(
-            batch_size, length, num_periods, self.num_levels
-        ))
+        )
+        probas = self.sigmoid_softmax(logits, dim = -1)
         
-        return (signals * gates).sum(dim = -1) / self.num_levels
+        return (probas * self.linspace).sum(dim = -1)
+
+
+    def sigmoid_softmax(self, logits, dim = -1):
+        positive = torch.sigmoid(logits)
+        probas = positive / positive.sum(dim = dim, keepdim = True)
+        return probas
 
 
 
