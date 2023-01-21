@@ -54,13 +54,6 @@ class CausalConvolution(nn.Module):
 
 
 
-def sigmoid_softmax(logits, dim = -1):
-    positive = torch.sigmoid(logits)
-    probas = positive / positive.sum(dim = dim, keepdim = True)
-    return probas
-
-
-
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
@@ -80,7 +73,7 @@ class SoftTrade(nn.Module):
         logits = self.proj_logits(mod).reshape(
             batch_size, length, num_periods, self.num_levels
         )
-        probas = sigmoid_softmax(logits, dim = -1)
+        probas = F.softmax(logits, dim = -1)
         
         return (probas * self.linspace).sum(dim = -1)
 
@@ -90,7 +83,7 @@ class SGConvConfig(PretrainedConfig):
     model_type = "SGConvTrader"
     def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = .1,
                  kernel_size = 5, num_levels = 41, max_loss = .9,
-                 initializer_range = None):
+                 commission = .02, initializer_range = None):
         super().__init__(
             n_embd = n_embd,
             n_head = n_head,
@@ -98,6 +91,7 @@ class SGConvConfig(PretrainedConfig):
             kernel_size = kernel_size,
             num_levels = num_levels,
             max_loss = max_loss,
+            commission = commission,
             initializer_range = initializer_range
         )
         
@@ -146,6 +140,7 @@ class SGConvTrader(PreTrainedModel):
     def __init__(self, config):
         super().__init__(config)
         self.max_loss = config.max_loss
+        self.commission = config.commission
                 
         self.conv_embed = CausalConvolution(
             input_size = num_features, hidden_size = config.n_embd,
@@ -162,7 +157,7 @@ class SGConvTrader(PreTrainedModel):
         self.trade = SoftTrade(config.n_embd, config.num_levels)
         self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
 
-        self.classification_loss = nn.NLLLoss()
+        self.classification_loss = nn.CrossEntropyLoss()
 
 
     def _init_weights(self, module):
@@ -201,8 +196,8 @@ class SGConvTrader(PreTrainedModel):
         # )
         capped_profit = soft_profit * floor_mask# * ceiling_mask        
         
-        # apply commission fee to floored profit (.01 = ~.5 points at 200x leverage)
-        capped_profit = capped_profit - soft_trade.abs() * .01
+        # apply commission fee to floored profit
+        capped_profit = capped_profit - soft_trade.abs() * self.commission
         
         # negative log return loss function (i.e. growth maximization) 
         trade_loss = -torch.log(1 + capped_profit).mean()
@@ -210,7 +205,7 @@ class SGConvTrader(PreTrainedModel):
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
         class_loss = self.classification_loss(
-            torch.log(sigmoid_softmax(logits.reshape(-1, num_classes))),
+            logits.reshape(-1, num_classes),
             classes.long().reshape(-1)
         )
     
