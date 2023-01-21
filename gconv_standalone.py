@@ -446,11 +446,12 @@ class GConv(nn.Module):
             k = F.pad(k0, (0, L)) \
                 + F.pad(k1.flip(-1), (L, 0)) \
 
-        k_f = torch.fft.rfft(k, n=2*L)  # (C H L)
-        u_f = torch.fft.rfft(u, n=2*L)  # (B H L)
-        # k_f.unsqueeze(-4) * u_f.unsqueeze(-3) # (B C H L)
-        y_f = contract('bhl,chl->bchl', u_f, k_f)
-        y = torch.fft.irfft(y_f, n=2*L)[..., :L]  # (B C H L)
+        with torch.autocast('cuda', enabled = False):
+            k_f = torch.fft.rfft(k, n=2*L)  # (C H L)
+            u_f = torch.fft.rfft(u.float(), n=2*L)  # (B H L)
+            # k_f.unsqueeze(-4) * u_f.unsqueeze(-3) # (B C H L)
+            y_f = contract('bhl,chl->bchl', u_f, k_f)
+            y = torch.fft.irfft(y_f, n=2*L)[..., :L]  # (B C H L)
 
         # Compute D term in state space equation - essentially a skip connection
         y = y + contract('bhl,ch->bchl', u, self.D)
