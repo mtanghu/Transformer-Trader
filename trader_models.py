@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
-from rotary_embedding_torch import RotaryEmbedding
+# from rotary_embedding_torch import RotaryEmbedding
 from gconv_standalone import GConv
-from mega_pytorch import MegaLayer
+from flash_attn.flash_attention import FlashMHA
 
 import math
 import numpy as np
@@ -98,30 +98,40 @@ class SGConvConfig(PretrainedConfig):
         
         
 class SGConvBlock(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, use_mha = False):
         super().__init__()
-        self.pre_gconv = nn.Sequential(
+        self.pre_attn = nn.Sequential(
             nn.LayerNorm(config.n_embd, elementwise_affine = False),
             nn.Linear(config.n_embd, config.n_embd, bias = False)
         )
-        self.gconv_layer = GConv(
-                d_model=config.n_embd,
-                d_state=64,
-                channels=config.n_head,
-                dropout=config.hidden_dropout_prob,
-                l_max=1440,
-                bidirectional=False,
-                transposed=False
-        )
+        if use_mha is False:
+            self.attn_layer = GConv(
+                    d_model = config.n_embd,
+                    d_state = 64,
+                    channels = 1,
+                    dropout = config.hidden_dropout_prob,
+                    l_max = 1440,
+                    bidirectional = False,
+                    transposed = False
+            )
+        else:
+            self.attn_layer = FlashMHA(
+                embed_dim = config.n_embd,
+                num_heads = config.n_head,
+                bias = False,
+                attention_dropout = 0,
+                causal = True,
+                batch_first = True
+            )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        self.Wgates = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
-        self.Wvalues = nn.Linear(config.n_embd, config.n_embd*4, bias = False)
-        self.proj = nn.Linear(config.n_embd*4, config.n_embd, bias = False)
+        self.Wgates = nn.Linear(config.n_embd, config.n_embd * 4, bias = False)
+        self.Wvalues = nn.Linear(config.n_embd, config.n_embd * 4, bias = False)
+        self.proj = nn.Linear(config.n_embd * 4, config.n_embd, bias = False)
 
 
     def forward(self, mod):
-        mod = self.gconv_layer(self.pre_gconv(mod))[0] + mod # residual
+        mod = self.attn_layer(self.pre_attn(mod))[0] + mod # residual
         
         residual = mod
         
@@ -151,7 +161,9 @@ class SGConvTrader(PreTrainedModel):
         n_layer = max(1, n_layer)
         print(f'Using {n_layer} layers')
         
-        self.layers = nn.ModuleList([SGConvBlock(config) for _ in range(n_layer)])
+        self.layers = nn.ModuleList([
+            SGConvBlock(config, use_mha = (i % 2 == 1)) for i in range(n_layer)
+        ])
         self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
@@ -187,13 +199,16 @@ class SGConvTrader(PreTrainedModel):
         soft_profit = soft_trade * future
 
         # floor losses (so that the log can operate correctly), notice detach
-        # also ceiling the gains for symmetry
         floor_mask = torch.where(
             soft_profit > -self.max_loss, 1, -self.max_loss / soft_profit.detach()
         )
+        
+        # also ceiling the gains for symmetry
         # ceiling_mask =  torch.where(
         #     soft_profit < self.max_loss, 1, self.max_loss / soft_profit.detach()
         # )
+        
+        # apply mask(s)
         capped_profit = soft_profit * floor_mask# * ceiling_mask        
         
         # apply commission fee to floored profit
