@@ -104,30 +104,30 @@ class SGConvBlock(nn.Module):
             nn.LayerNorm(config.n_embd, elementwise_affine = False),
             nn.Linear(config.n_embd, config.n_embd, bias = False)
         )
-        if use_mha is False:
-            self.attn_layer = GConv(
-                    d_model = config.n_embd,
-                    d_state = 64,
-                    channels = 1,
-                    dropout = config.hidden_dropout_prob,
-                    l_max = 1440,
-                    bidirectional = False,
-                    transposed = False
-            )
-        else:
-            self.attn_layer = FlashMHA(
-                embed_dim = config.n_embd,
-                num_heads = config.n_head,
-                bias = False,
-                attention_dropout = 0,
-                causal = True,
-                batch_first = True
-            )
+        # if use_mha is False:
+        #     self.attn_layer = GConv(
+        #             d_model = config.n_embd,
+        #             d_state = 64,
+        #             channels = 1,
+        #             dropout = config.hidden_dropout_prob,
+        #             l_max = 1440,
+        #             bidirectional = False,
+        #             transposed = False
+        #     )
+        # else:
+        self.attn_layer = FlashMHA(
+            embed_dim = config.n_embd,
+            num_heads = config.n_head,
+            bias = False,
+            attention_dropout = 0,
+            causal = True,
+            batch_first = True
+        )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        self.Wgates = nn.Linear(config.n_embd, config.n_embd * 4, bias = False)
-        self.Wvalues = nn.Linear(config.n_embd, config.n_embd * 4, bias = False)
-        self.proj = nn.Linear(config.n_embd * 4, config.n_embd, bias = False)
+        self.Wgates = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
+        self.Wvalues = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
+        self.proj = nn.Linear(config.n_embd * 2, config.n_embd, bias = False)
 
 
     def forward(self, mod):
@@ -157,7 +157,7 @@ class SGConvTrader(PreTrainedModel):
             kernel_size = config.kernel_size
         )
         
-        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2)
+        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2 / 5)
         n_layer = max(1, n_layer)
         print(f'Using {n_layer} layers')
         
