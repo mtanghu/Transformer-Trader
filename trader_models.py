@@ -157,7 +157,7 @@ class SGConvTrader(PreTrainedModel):
             kernel_size = config.kernel_size
         )
         
-        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2 / 5)
+        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2)
         n_layer = max(1, n_layer)
         print(f'Using {n_layer} layers')
         
