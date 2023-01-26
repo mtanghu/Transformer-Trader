@@ -218,6 +218,7 @@ class SGConvTrader(PreTrainedModel):
 
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
+        classes = torch.where(overnight_masks.long() != 1, classes, -100)
         class_loss = self.classification_loss(
             logits.reshape(-1, num_classes),
             classes.long().reshape(-1)
