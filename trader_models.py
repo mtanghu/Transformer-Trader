@@ -100,29 +100,26 @@ class SGConvConfig(PretrainedConfig):
 class SGConvBlock(nn.Module):
     def __init__(self, config, use_mha = False):
         super().__init__()
-        self.pre_attn = nn.Sequential(
-            nn.LayerNorm(config.n_embd, elementwise_affine = False),
-            nn.Linear(config.n_embd, config.n_embd, bias = False)
-        )
-        # if use_mha is False:
-        #     self.attn_layer = GConv(
-        #             d_model = config.n_embd,
-        #             d_state = 64,
-        #             channels = 1,
-        #             dropout = config.hidden_dropout_prob,
-        #             l_max = 1440,
-        #             bidirectional = False,
-        #             transposed = False
-        #     )
-        # else:
-        self.attn_layer = FlashMHA(
-            embed_dim = config.n_embd,
-            num_heads = config.n_head,
-            bias = False,
-            attention_dropout = 0,
-            causal = True,
-            batch_first = True
-        )
+        self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
+        if use_mha is False:
+            self.attn_layer = GConv(
+                    d_model = config.n_embd,
+                    d_state = 64,
+                    channels = 1,
+                    dropout = config.hidden_dropout_prob,
+                    l_max = 1440,
+                    bidirectional = False,
+                    transposed = False
+            )
+        else:
+            self.attn_layer = FlashMHA(
+                embed_dim = config.n_embd,
+                num_heads = config.n_head,
+                bias = False,
+                attention_dropout = 0,
+                causal = True,
+                batch_first = True
+            )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         self.Wgates = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
@@ -131,7 +128,7 @@ class SGConvBlock(nn.Module):
 
 
     def forward(self, mod):
-        mod = self.attn_layer(self.pre_attn(mod))[0] + mod # residual
+        mod = self.attn_layer(self.attn_norm(mod))[0] + mod # residual
         
         residual = mod
         
@@ -184,6 +181,8 @@ class SGConvTrader(PreTrainedModel):
         embed = self.conv_embed(ohlcv)
         for layer in self.layers:
             hidden = layer(embed)
+            
+        # standard for modern transformers
         hidden = self.final_norm(hidden)
         
         soft_trade = self.trade(hidden)

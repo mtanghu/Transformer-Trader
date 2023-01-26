@@ -302,41 +302,12 @@ class GConv(nn.Module):
         self.mode = mode
         self.l_max = l_max
 
-        # optional multiplicative modulation GLU-style
-        # https://arxiv.org/abs/2002.05202
-        self.hyper = hyper_act is not None
-        if self.hyper:
-            channels *= 2
-            self.hyper_activation = Activation(hyper_act)
-
+        self.project = nn.Linear(d_model, d_model)
+        
         self.D = nn.Parameter(torch.randn(channels, self.h))
 
         if self.bidirectional:
             channels *= 2
-
-        # Pointwise
-        if not self.linear:
-            self.activation = Activation(activation)
-            dropout_fn = nn.Dropout2d if self.transposed else nn.Dropout
-            self.dropout = dropout_fn(
-                dropout) if dropout > 0.0 else nn.Identity()
-            if self.ln:
-                self.norm = Normalization(
-                    self.h*self.channels, transposed=transposed)
-            else:
-                self.norm = nn.Identity()
-
-        # position-wise output transform to mix features
-        if not self.linear:
-            self.output_linear = LinearActivation(
-                self.h*self.channels,
-                self.h,
-                transposed=self.transposed,
-                initializer=initializer,
-                activation=postact,
-                activate=True,
-                weight_norm=weight_norm,
-            )
 
         self.init_scale = kernel_args.get('init_scale', 0)
         self.kernel_dim = kernel_args.get('kernel_dim', 64)
@@ -390,8 +361,14 @@ class GConv(nn.Module):
 
         Returns: same shape as u
         """
-        if not self.transposed:
-            u = u.transpose(-1, -2)
+        
+        # transpose for linear projection on embedding dimension
+        if self.transposed:
+            u.transpose(-1, -2)
+        u = self.project(u)
+        
+        # transpose so conv fft trick applies to the sequence dimension
+        u = u.transpose(-1, -2)
         L = u.size(-1)
 
         kernel_list = []
@@ -458,16 +435,9 @@ class GConv(nn.Module):
 
         # Reshape to flatten channels
         y = rearrange(y, '... c h l -> ... (c h) l')
-
-        if not self.linear:
-            y = self.dropout(self.activation(y))
-
+        
         if not self.transposed:
             y = y.transpose(-1, -2)
-
-        if not self.linear:
-            y = self.norm(y)
-            y = self.output_linear(y)
 
         if return_kernel:
             return y, k
