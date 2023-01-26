@@ -81,9 +81,9 @@ class SoftTrade(nn.Module):
 
 class SGConvConfig(PretrainedConfig):
     model_type = "SGConvTrader"
-    def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = .1,
-                 kernel_size = 5, num_levels = 41, max_loss = .9,
-                 commission = .02, initializer_range = None):
+    def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = 0,
+                 kernel_size = 10, num_levels = 21, max_loss = .9,
+                 commission = .01, initializer_range = None):
         super().__init__(
             n_embd = n_embd,
             n_head = n_head,
