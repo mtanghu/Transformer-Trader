@@ -103,13 +103,13 @@ class SGConvBlock(nn.Module):
         self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         if use_mha is False:
             self.attn_layer = GConv(
-                    d_model = config.n_embd,
-                    d_state = 64,
-                    channels = 1,
-                    dropout = config.hidden_dropout_prob,
-                    l_max = 1440,
-                    bidirectional = False,
-                    transposed = False
+                d_model = config.n_embd,
+                d_state = 64,
+                channels = 1,
+                dropout = config.hidden_dropout_prob,
+                l_max = 1440,
+                bidirectional = False,
+                transposed = False
             )
         else:
             self.attn_layer = FlashMHA(
@@ -122,9 +122,9 @@ class SGConvBlock(nn.Module):
             )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        self.Wgates = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
-        self.Wvalues = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
-        self.proj = nn.Linear(config.n_embd * 2, config.n_embd, bias = False)
+        self.Wgates = nn.Linear(config.n_embd, config.n_embd, bias = False)
+        self.Wvalues = nn.Linear(config.n_embd, config.n_embd, bias = False)
+        self.proj = nn.Linear(config.n_embd, config.n_embd, bias = False)
 
 
     def forward(self, mod):
@@ -224,7 +224,7 @@ class SGConvTrader(PreTrainedModel):
             classes.long().reshape(-1)
         )
     
-        loss = trade_loss + class_loss
+        loss =  2 * trade_loss + class_loss
 
         return {
             'loss': loss,
