@@ -6,9 +6,8 @@ from datasets import Dataset
 
 
 
-def preprocess(filename):
-    fx = pd.read_csv(filename)
-    
+# fix timezones, gaps, and interpolate missing data
+def preprocess(fx):    
     fx['datetime'] = pd.to_datetime(fx['datetime'], infer_datetime_format = True)
     # fx = fx[fx['datetime'].dt.year >= 2009].reset_index(drop = True)
     
@@ -43,6 +42,7 @@ def preprocess(filename):
     return fx
 
 
+# form labels and overnight masks for training purposes
 def create_training_data(fx, periods, leverage):
     # let's just arbitrary say there should be less than 400 zero volume -- shouldn't really mattter in the end
     voluminous_index = (fx['volume'] == 0.).groupby(fx['ordinal_day']).filter(lambda x: x.sum() < 400).index
@@ -83,6 +83,7 @@ def create_training_data(fx, periods, leverage):
     return fx, future_cols, mask_cols
 
 
+# remove means from price data & volume
 def demean(fx):
     # de mean prices by turning them into % change from previous minute close
     price_features = ['open', 'high', 'low', 'close']
@@ -96,14 +97,18 @@ def demean(fx):
 
 
 def make_dataset(filename, periods = [5, 10, 15, 20, 30, 45, 60, 90, 120],
-                 leverage = 200, return_df = False,
+                 leverage = 200, return_df = False, randomize = False,
                  bins = None, stds = None, squash_factor = 4,
                  features = ['open', 'high', 'low', 'close', 'volume']):
+    fx = pd.read_csv(filename)
+
+    if randomize:
+        fx = randomize(fx)
 
     # fix timezones, gaps, and interpolate missing data
-    fx = preprocess(filename)
+    fx = preprocess(fx)
 
-    # add future columns and overnight masks for training purposes
+    # form labels and overnight masks for training purposes
     fx, future_cols, mask_cols = create_training_data(fx, periods, leverage)
 
     # remove means from price data & volume
