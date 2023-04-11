@@ -96,6 +96,55 @@ def demean(fx):
     return fx
 
 
+def randomize_csv(fx):
+    changes = fx.set_index('datetime')
+    price_features = ['open', 'high', 'low', 'close']
+
+    # convert open, high, low and close to percent change of previous close
+    changes[price_features] = changes[price_features].div(changes['close'].shift(1), axis = 0) - 1
+
+    # cap max percent change at 50%
+    changes[price_features] = changes[price_features].clip(-0.5, 0.5)
+
+    # turn all closes changes positive (so we can randomize the sign later)
+    negatives = changes[changes['close'] < 0]
+    changes.loc[negatives.index] = -changes.loc[negatives.index]
+
+    # swap high and low for rows turned negative
+    changes.loc[negatives.index, ['high', 'low']] = changes.loc[negatives.index, ['low', 'high']].values
+
+    # set EXACTLY 50% of rows to turn negative
+    new_negatives = changes.sample(frac = 0.5).index
+    changes.loc[new_negatives] = -changes.loc[new_negatives]
+
+    # again swap high and low for rows turned negative
+    changes.loc[new_negatives, ['high', 'low']] = changes.loc[new_negatives, ['low', 'high']].values
+
+    # adjust so that multiplying changes together has EV 0
+    changes['close'] = np.log1p(changes['close'])
+    changes['close'] = changes['close'] - changes['close'].mean()
+    changes['close'] = np.exp(changes['close']) - 1
+
+    # ensure product of changes is 1 (i.e. no net change in price)
+    np.allclose(np.exp(np.sum(np.log1p(changes['close']))), 1)
+
+    # convert prices back to non percent based forms (multiply closes changes to recover prices to bases open high and low on)
+    changes['close'] = np.exp(np.cumsum(np.log1p(changes['close'])))
+    changes[['open', 'high', 'low']] = (changes[['open', 'high', 'low']] + 1).mul(changes['close'].shift(1), axis = 0)
+
+    # ensure highs and lows are correctly higher or lower than close
+    assert abs((changes['high'] - changes['close']).min()) < 1e-6
+    assert abs((changes['low'] - changes['close']).max()) < 1e-6
+
+    # set volume back to all positive
+    changes['volume'] = abs(changes['volume'])
+
+    # drop nans and reset index so that changes looks like original csv df
+    changes = changes.dropna().reset_index()
+
+    return changes
+
+
 def make_dataset(filename, periods = [5, 10, 15, 20, 30, 45, 60, 90, 120],
                  leverage = 200, return_df = False, randomize = False,
                  bins = None, stds = None, squash_factor = 4,
@@ -103,7 +152,7 @@ def make_dataset(filename, periods = [5, 10, 15, 20, 30, 45, 60, 90, 120],
     fx = pd.read_csv(filename)
 
     if randomize:
-        fx = randomize(fx)
+        fx = randomize_csv(fx)
 
     # fix timezones, gaps, and interpolate missing data
     fx = preprocess(fx)
@@ -149,9 +198,10 @@ def make_dataset(filename, periods = [5, 10, 15, 20, 30, 45, 60, 90, 120],
     return ds, stds
 
 
-def get_standards(leverage, features):
+def get_standards(leverage, features, randomize = False):
     # just using EUR/USD for now for simplicity
-    curr = make_dataset("Currency_Data/OANDA/EUR_USD.csv", leverage = leverage, return_df = True)
+    curr = make_dataset("Currency_Data/OANDA/EUR_USD.csv", leverage = leverage,
+                        return_df = True, randomize = randomize)
     future_cols = curr.columns[curr.columns.str.contains('future')]
 
     bin_map = {}
