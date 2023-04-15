@@ -209,6 +209,9 @@ def get_standards(leverage, features, randomize = False):
         
         # get the number of cuts to make so that the middle bin only changes by .004 (i.e. commission)
         num_cuts = int(1 / (1 - (no_zeros.abs() > .004).mean()))
+
+        # max the number of cuts at 64 for simplicity with CE loss
+        num_cuts = min(num_cuts, 64)
         
         # make the number of cuts odd so that there is a middle bin
         if num_cuts % 2 == 0:
