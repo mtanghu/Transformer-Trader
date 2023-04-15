@@ -86,8 +86,12 @@ def create_training_data(fx, periods, leverage):
 # remove means from price data & volume
 def demean(fx):
     # de mean prices by turning them into % change from previous minute close
+    # sub and divide for numerical stability
     price_features = ['open', 'high', 'low', 'close']
-    fx[price_features] = fx[price_features].div(fx['close'].shift(1), axis = 0) - 1
+    fx[price_features] = fx[price_features].sub(
+        fx['close'].shift(1), axis = 0).div(
+        fx['close'].shift(1), axis = 0
+    )
         
     # de mean volume using 200ma (exact number doesn't matter much)
     fx["volume"] = fx['volume'] - fx['volume'].groupby(fx['ordinal_day']).rolling(200, min_periods = 0).mean().reset_index(drop = True, level = 0)
@@ -100,40 +104,44 @@ def randomize_csv(fx):
     price_features = ['open', 'high', 'low', 'close']
 
     # convert open, high, low and close to percent change of previous close
-    changes[price_features] = changes[price_features].div(changes['close'].shift(1), axis = 0) - 1
+    # sub and divide for numerical stability
+    changes[price_features] = changes[price_features].sub(
+        changes['close'].shift(1), axis = 0).div(
+        changes['close'].shift(1), axis = 0
+    )
 
-    # cap max percent change at 50%
-    changes[price_features] = changes[price_features].clip(-0.5, 0.5)
+    # use log returns for numerical stability
+    changes[price_features] = np.log1p(changes[price_features])
+
+    # adjust all price features so that the close log return mean is 0
+    changes[price_features] = changes[price_features] - changes['close'].mean()
 
     # turn all closes changes positive (so we can randomize the sign later)
-    negatives = changes[changes['close'] < 0]
-    changes.loc[negatives.index] = -changes.loc[negatives.index]
+    negatives = changes[changes['close'] < 0].index
+    changes.loc[negatives] = -changes.loc[negatives]
 
-    # swap high and low for rows turned negative
-    changes.loc[negatives.index, ['high', 'low']] = changes.loc[negatives.index, ['low', 'high']].values
+    # swap high and low for rows turned negative (to reflect sign change)
+    changes.loc[negatives, ['high', 'low']] = changes.loc[negatives, ['low', 'high']].values
 
-    # set EXACTLY 50% of rows to turn negative
-    new_negatives = changes.sample(frac = 0.5).index
+    # randomly turn changes negative with probability .5
+    new_negatives = changes[np.random.rand(len(changes)) < .5].index
     changes.loc[new_negatives] = -changes.loc[new_negatives]
 
-    # again swap high and low for rows turned negative
+    # again reflect the highs and lows
     changes.loc[new_negatives, ['high', 'low']] = changes.loc[new_negatives, ['low', 'high']].values
 
-    # adjust so that multiplying changes together has EV 0
-    changes['close'] = np.log1p(changes['close'])
-    changes['close'] = changes['close'] - changes['close'].mean()
-    changes['close'] = np.exp(changes['close']) - 1
+    # convert closes to cumulative log return (cumsum of log returns is a stable log cumprod of returns)
+    changes['close'] = np.cumsum(changes['close'])
 
-    # ensure product of changes is 1 (i.e. no net change in price)
-    np.allclose(np.exp(np.sum(np.log1p(changes['close']))), 1)
+    # convert OHL to log returns based on previous close log returns
+    changes[['open', 'high', 'low']] = changes[['open', 'high', 'low']].add(changes['close'].shift(1), axis = 0)
 
-    # convert prices back to non percent based forms (multiply closes changes to recover prices to bases open high and low on)
-    changes['close'] = np.exp(np.cumsum(np.log1p(changes['close'])))
-    changes[['open', 'high', 'low']] = (changes[['open', 'high', 'low']] + 1).mul(changes['close'].shift(1), axis = 0)
+    # exp to recover total change (aka price)
+    changes[price_features] = np.exp(changes[price_features])
 
     # ensure highs and lows are correctly higher or lower than close
-    assert abs((changes['high'] - changes['close']).min()) < 1e-6
-    assert abs((changes['low'] - changes['close']).max()) < 1e-6
+    assert abs((changes['high'] - changes['close']).min()) == 0
+    assert abs((changes['low'] - changes['close']).max()) == 0
 
     # set volume back to all positive
     changes['volume'] = abs(changes['volume'])
