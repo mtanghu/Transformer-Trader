@@ -87,8 +87,7 @@ def create_training_data(fx, periods, leverage):
 def demean(fx):
     # de mean prices by turning them into % change from previous minute close
     price_features = ['open', 'high', 'low', 'close']
-    fx[price_features] = fx[price_features].subtract(fx['close'].shift(1), axis = 0)
-    fx[price_features] = fx[price_features].div(fx['close'].shift(1), axis = 0)
+    fx[price_features] = fx[price_features].div(fx['close'].shift(1), axis = 0) - 1
         
     # de mean volume using 200ma (exact number doesn't matter much)
     fx["volume"] = fx['volume'] - fx['volume'].groupby(fx['ordinal_day']).rolling(200, min_periods = 0).mean().reset_index(drop = True, level = 0)
