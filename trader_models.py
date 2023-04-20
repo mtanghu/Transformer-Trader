@@ -28,11 +28,11 @@ class CausalConvolution(nn.Module):
             padding = 0, bias = False
         )
         
-        # self.gelu = nn.GELU()
+        self.gelu = nn.GELU()
         
-        # self.out_proj = nn.Linear(
-        #     hidden_size, hidden_size, bias = False
-        # )
+        self.out_proj = nn.Linear(
+            hidden_size, hidden_size, bias = False
+        )
         
         
     def forward(self, hidden_states):
@@ -46,9 +46,9 @@ class CausalConvolution(nn.Module):
         # unpermute
         mod = mod.permute(0, 2, 1)
         
-        # mod = self.gelu(mod)
+        mod = self.gelu(mod)
         
-        # mod = self.out_proj(mod)
+        mod = self.out_proj(mod)
         
         return mod
 
