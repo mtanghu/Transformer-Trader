@@ -154,8 +154,9 @@ class SGConvTrader(PreTrainedModel):
             kernel_size = config.kernel_size
         )
         
-        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2)
-        n_layer = max(1, n_layer)
+        # use half the number of layers as levine suggests for speed
+        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2 / 2)
+        n_layer = max(2, n_layer) # at least 2 layers for scaling
         print(f'Using {n_layer} layers')
         
         self.layers = nn.ModuleList([
