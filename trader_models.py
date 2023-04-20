@@ -28,11 +28,11 @@ class CausalConvolution(nn.Module):
             padding = 0, bias = False
         )
         
-        self.gelu = nn.GELU()
+        # self.gelu = nn.GELU()
         
-        self.out_proj = nn.Linear(
-            hidden_size, hidden_size, bias = False
-        )
+        # self.out_proj = nn.Linear(
+        #     hidden_size, hidden_size, bias = False
+        # )
         
         
     def forward(self, hidden_states):
@@ -46,9 +46,9 @@ class CausalConvolution(nn.Module):
         # unpermute
         mod = mod.permute(0, 2, 1)
         
-        mod = self.gelu(mod)
+        # mod = self.gelu(mod)
         
-        mod = self.out_proj(mod)
+        # mod = self.out_proj(mod)
         
         return mod
 
@@ -101,25 +101,33 @@ class SGConvBlock(nn.Module):
     def __init__(self, config, use_mha = False):
         super().__init__()
         self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        if use_mha is False:
-            self.attn_layer = GConv(
-                d_model = config.n_embd,
-                d_state = 64,
-                channels = 1,
-                dropout = config.hidden_dropout_prob,
-                l_max = 1440,
-                bidirectional = False,
-                transposed = False
-            )
-        else:
-            self.attn_layer = FlashMHA(
-                embed_dim = config.n_embd,
-                num_heads = config.n_head,
-                bias = False,
-                attention_dropout = 0,
-                causal = True,
-                batch_first = True
-            )
+        # if use_mha is False:
+        #     self.attn_layer = GConv(
+        #         d_model = config.n_embd,
+        #         d_state = 64,
+        #         channels = 1,
+        #         dropout = config.hidden_dropout_prob,
+        #         l_max = 1440,
+        #         bidirectional = False,
+        #         transposed = False
+        #     )
+        # else:
+        #     self.attn_layer = FlashMHA(
+        #         embed_dim = config.n_embd,
+        #         num_heads = config.n_head,
+        #         bias = False,
+        #         attention_dropout = 0,
+        #         causal = True,
+        #         batch_first = True
+        #     )
+        self.attn_layer = FlashMHA(
+            embed_dim = config.n_embd,
+            num_heads = config.n_head,
+            bias = False,
+            attention_dropout = 0,
+            causal = True,
+            batch_first = True
+        )
         
         self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         self.Wgates = nn.Linear(config.n_embd, config.n_embd, bias = False)
