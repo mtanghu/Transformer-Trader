@@ -233,7 +233,7 @@ class SGConvTrader(PreTrainedModel):
             classes.long().reshape(-1)
         )
     
-        loss =  2 * trade_loss + class_loss
+        loss = trade_loss + class_loss
 
         return {
             'loss': loss,
