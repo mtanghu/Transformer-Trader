@@ -162,7 +162,7 @@ class SGConvTrader(PreTrainedModel):
             kernel_size = config.kernel_size
         )
 
-        self.emed_drop = nn.Dropout(config.hidden_dropout_prob)
+        self.embed_drop = nn.Dropout(config.hidden_dropout_prob)
         
         # use half the number of layers as levine suggests for speed
         n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2 / 2)
