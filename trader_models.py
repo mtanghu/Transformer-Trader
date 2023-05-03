@@ -225,22 +225,21 @@ class SGConvTrader(PreTrainedModel):
         capped_profit = capped_profit - soft_trade.abs() * self.commission
         
         # negative log return loss function (i.e. growth maximization) 
-        trade_loss = (1 / (1 + torch.log(1 + capped_profit))).mean()
+        trade_loss = (1 / (1 + torch.log1p(capped_profit))).mean()
 
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
-        # classes = torch.where(overnight_masks.long() != 1, classes, -100)
-        # class_loss = self.classification_loss(
-        #     logits.reshape(-1, num_classes),
-        #     classes.long().reshape(-1)
-        # )
+        classes = torch.where(overnight_masks.long() != 1, classes, -100)
+        class_loss = self.classification_loss(
+            logits.reshape(-1, num_classes),
+            classes.long().reshape(-1)
+        )
     
-        loss = trade_loss# + class_loss
+        loss = trade_loss + class_loss
 
         return {
             'loss': loss,
-            # 'classification loss': class_loss,
-            'classification loss': trade_loss,
+            'classification loss': class_loss,
             'trade loss': trade_loss,
             'profits': soft_profit,
             'trades': soft_trade,
