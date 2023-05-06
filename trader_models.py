@@ -61,7 +61,7 @@ class SoftTrade(nn.Module):
         assert (num_levels + 1) % 2 == 0, "the number of tradeable levels should be odd"
         self.num_levels = num_levels
         
-        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels)
+        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
         self.linspace = nn.Parameter(
             torch.tensor(np.linspace(-1, 1, num_levels)),
             requires_grad = False
@@ -175,7 +175,7 @@ class SGConvTrader(PreTrainedModel):
         self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
-        self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
+        self.logits = nn.Linear(config.n_embd, num_periods * num_classes, bias = False)
 
         self.classification_loss = nn.CrossEntropyLoss()
 
