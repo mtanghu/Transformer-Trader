@@ -161,8 +161,7 @@ class SGConvTrader(PreTrainedModel):
             input_size = num_features, hidden_size = config.n_embd,
             kernel_size = config.kernel_size
         )
-
-        self.embed_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
+        
         self.embed_drop = nn.Dropout(config.hidden_dropout_prob)
         
         # use half the number of layers as levine suggests for speed
@@ -190,12 +189,12 @@ class SGConvTrader(PreTrainedModel):
         batch_size, seq_len, _ = ohlcv.shape
         future = labels # rename for readability
         
-        embed = self.embed_drop(self.embed_norm(self.conv_embed(ohlcv)))
+        embed = self.embed_drop(self.conv_embed(ohlcv))
         for layer in self.layers:
             hidden = layer(embed)
             
         # standard for modern transformers
-        hidden = self.final_norm(hidden)
+        # hidden = self.final_norm(hidden)
         
         soft_trade = self.trade(hidden)
         
