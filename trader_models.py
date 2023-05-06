@@ -162,6 +162,7 @@ class SGConvTrader(PreTrainedModel):
             kernel_size = config.kernel_size
         )
 
+        self.embed_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         self.embed_drop = nn.Dropout(config.hidden_dropout_prob)
         
         # use half the number of layers as levine suggests for speed
@@ -189,7 +190,7 @@ class SGConvTrader(PreTrainedModel):
         batch_size, seq_len, _ = ohlcv.shape
         future = labels # rename for readability
         
-        embed = self.embed_drop(self.conv_embed(ohlcv))
+        embed = self.embed_drop(self.embed_norm(self.conv_embed(ohlcv)))
         for layer in self.layers:
             hidden = layer(embed)
             
@@ -214,9 +215,9 @@ class SGConvTrader(PreTrainedModel):
         )
         
         # also ceiling the gains for symmetry
-        # ceiling_mask =  torch.where(
-        #     soft_profit < self.max_loss, 1, self.max_loss / soft_profit.detach()
-        # )
+        ceiling_mask =  torch.where(
+            soft_profit < self.max_loss, 1, self.max_loss / soft_profit.detach()
+        )
         
         # apply mask(s)
         capped_profit = soft_profit * floor_mask# * ceiling_mask        
