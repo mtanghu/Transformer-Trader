@@ -3,9 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
-# from rotary_embedding_torch import RotaryEmbedding
-from gconv_standalone import GConv
-from flash_attn.flash_attention import FlashMHA
+from flash_attn.modules.mha import MHA
 
 import math
 import numpy as np
@@ -54,6 +52,44 @@ class CausalConvolution(nn.Module):
 
 
 
+# code from original authors
+class RMSNorm(nn.Module):
+    def __init__(self, d, p=-1., eps=1e-8, bias=False):
+        super(RMSNorm, self).__init__()
+
+        self.eps = eps
+        self.d = d
+        self.p = p
+        self.bias = bias
+
+        self.scale = nn.Parameter(torch.ones(d))
+        self.register_parameter("scale", self.scale)
+
+        if self.bias:
+            self.offset = nn.Parameter(torch.zeros(d))
+            self.register_parameter("offset", self.offset)
+
+    def forward(self, x):
+        if self.p < 0. or self.p > 1.:
+            norm_x = x.norm(2, dim=-1, keepdim=True)
+            d_x = self.d
+        else:
+            partial_size = int(self.d * self.p)
+            partial_x, _ = torch.split(x, [partial_size, self.d - partial_size], dim=-1)
+
+            norm_x = partial_x.norm(2, dim=-1, keepdim=True)
+            d_x = partial_size
+
+        rms_x = norm_x * d_x ** (-1. / 2)
+        x_normed = x / (rms_x + self.eps)
+
+        if self.bias:
+            return self.scale * x_normed + self.offset
+
+        return self.scale * x_normed
+
+
+
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
@@ -61,7 +97,7 @@ class SoftTrade(nn.Module):
         assert (num_levels + 1) % 2 == 0, "the number of tradeable levels should be odd"
         self.num_levels = num_levels
         
-        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels, bias = False)
+        self.proj_logits = nn.Linear(hidden_size, num_periods * num_levels)
         self.linspace = nn.Parameter(
             torch.tensor(np.linspace(-1, 1, num_levels)),
             requires_grad = False
@@ -83,7 +119,7 @@ class SGConvConfig(PretrainedConfig):
     model_type = "SGConvTrader"
     def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = 0,
                  kernel_size = 10, num_levels = 21, max_loss = .9,
-                 commission = .01, initializer_range = None):
+                 commission = .01, use_swiglu = False, initializer_range = None):
         super().__init__(
             n_embd = n_embd,
             n_head = n_head,
@@ -92,60 +128,56 @@ class SGConvConfig(PretrainedConfig):
             num_levels = num_levels,
             max_loss = max_loss,
             commission = commission,
+            use_swiglu = use_swiglu,
             initializer_range = initializer_range
         )
         
         
         
 class SGConvBlock(nn.Module):
-    def __init__(self, config, use_mha = False):
+    def __init__(self, config):
         super().__init__()
-        self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        # if use_mha is False:
-        #     self.attn_layer = GConv(
-        #         d_model = config.n_embd,
-        #         d_state = 64,
-        #         channels = 1,
-        #         dropout = config.hidden_dropout_prob,
-        #         l_max = 1440,
-        #         bidirectional = False,
-        #         transposed = False
-        #     )
-        # else:
-        #     self.attn_layer = FlashMHA(
-        #         embed_dim = config.n_embd,
-        #         num_heads = config.n_head,
-        #         bias = False,
-        #         attention_dropout = 0,
-        #         causal = True,
-        #         batch_first = True
-        #     )
-        self.attn_layer = FlashMHA(
+        self.attn_norm = RMSNorm(config.n_embd)
+        self.attn_layer = MHA(
             embed_dim = config.n_embd,
             num_heads = config.n_head,
-            bias = False,
-            attention_dropout = 0,
+            qkv_proj_bias=True,
+            out_proj_bias=True,
+            dropout = config.hidden_dropout_prob,
             causal = True,
-            batch_first = True
+            rotary_emb_dim = config.n_embd // config.n_head,
+            rotary_emb_interleaved = True,
+            use_flash_attn = True,
         )
         
-        self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
-        self.Wgates = nn.Linear(config.n_embd, config.n_embd, bias = False)
-        self.Wvalues = nn.Linear(config.n_embd, config.n_embd, bias = False)
-        self.proj = nn.Linear(config.n_embd, config.n_embd, bias = False)
+        self.ff_prenorm = RMSNorm(config.n_embd)
+
+        self.use_swiglu = config.use_swiglu
+        if config.use_swiglu:
+            self.Wgates = nn.Linear(config.n_embd, config.n_embd, bias = False)
+            self.Wvalues = nn.Linear(config.n_embd, config.n_embd, bias = False)
+            self.proj = nn.Linear(config.n_embd, config.n_embd, bias = False)
+        else:
+            self.boom = nn.Linear(config.n_embd, config.n_embd * 2, bias = False)
+            self.gelu = nn.GELU()
+            self.unboom = nn.Linear(config.n_embd * 2, config.n_embd, bias = False)
 
 
     def forward(self, mod):
         mod = self.attn_layer(self.attn_norm(mod))[0] + mod # residual
         
         residual = mod
+
+        mod = self.ff_prenorm(mod)        
+        if self.use_swiglu:
+            gates = F.silu(self.Wgates(mod))
+            values = self.Wvalues(mod)
+            mlp_output = self.proj(gates * values)
+        else:
+            mod = self.gelu(self.boom(mod))
+            mlp_output = self.unboom(mod)
         
-        # SwiGLU
-        mod = self.ff_prenorm(mod)
-        gates = F.silu(self.Wgates(mod))
-        values = self.Wvalues(mod)
-        
-        return self.proj(gates * values) + residual
+        return mlp_output + residual
 
 
 
@@ -164,18 +196,18 @@ class SGConvTrader(PreTrainedModel):
         
         self.embed_drop = nn.Dropout(config.hidden_dropout_prob)
         
-        # use half the number of layers as levine suggests for speed
-        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2 / 2)
+        # levine 2020 number of layers
+        n_layer = round((math.log(config.n_embd) - 5.039) / 5.55e-2)
         n_layer = max(2, n_layer) # at least 2 layers for scaling
         print(f'Using {n_layer} layers')
         
         self.layers = nn.ModuleList([
-            SGConvBlock(config, use_mha = (i % 2 == 1)) for i in range(n_layer)
+            SGConvBlock(config) for i in range(n_layer)
         ])
-        self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
+        self.final_norm = RMSNorm(config.n_embd)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
-        self.logits = nn.Linear(config.n_embd, num_periods * num_classes, bias = False)
+        self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
 
         self.classification_loss = nn.CrossEntropyLoss()
 
@@ -219,13 +251,13 @@ class SGConvTrader(PreTrainedModel):
         )
         
         # apply mask(s)
-        capped_profit = soft_profit * floor_mask# * ceiling_mask        
+        capped_profit = soft_profit * floor_mask * ceiling_mask        
         
         # apply commission fee to floored profit
         capped_profit = capped_profit - soft_trade.abs() * self.commission
         
         # negative log return loss function (i.e. growth maximization) 
-        trade_loss = (1 / (1 + torch.log1p(capped_profit))).mean()
+        trade_loss = -torch.log1p(capped_profit).mean()
 
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
