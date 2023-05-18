@@ -77,8 +77,8 @@ class SoftTrade(nn.Module):
 
 
 
-class SGConvConfig(PretrainedConfig):
-    model_type = "SGConvTrader"
+class TraderConfig(PretrainedConfig):
+    model_type = "Trader"
     def __init__(self, n_embd = 256, n_head = 4, hidden_dropout_prob = 0,
                  kernel_size = 10, num_levels = 21, max_loss = .9,
                  commission = .01, use_swiglu = False, initializer_range = None):
@@ -96,7 +96,7 @@ class SGConvConfig(PretrainedConfig):
         
         
         
-class SGConvBlock(nn.Module):
+class MHABlock(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
@@ -143,8 +143,8 @@ class SGConvBlock(nn.Module):
 
 
 
-class SGConvTrader(PreTrainedModel):
-    config_class = SGConvConfig
+class Trader(PreTrainedModel):
+    config_class = TraderConfig
     
     def __init__(self, config):
         super().__init__(config)
@@ -164,7 +164,7 @@ class SGConvTrader(PreTrainedModel):
         print(f'Using {n_layer} layers')
         
         self.layers = nn.ModuleList([
-            SGConvBlock(config) for i in range(n_layer)
+            MHABlock(config) for i in range(n_layer)
         ])
         self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
