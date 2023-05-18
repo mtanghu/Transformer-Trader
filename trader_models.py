@@ -52,44 +52,6 @@ class CausalConvolution(nn.Module):
 
 
 
-# code from original authors
-class RMSNorm(nn.Module):
-    def __init__(self, d, p=-1., eps=1e-8, bias=False):
-        super(RMSNorm, self).__init__()
-
-        self.eps = eps
-        self.d = d
-        self.p = p
-        self.bias = bias
-
-        self.scale = nn.Parameter(torch.ones(d))
-        self.register_parameter("scale", self.scale)
-
-        if self.bias:
-            self.offset = nn.Parameter(torch.zeros(d))
-            self.register_parameter("offset", self.offset)
-
-    def forward(self, x):
-        if self.p < 0. or self.p > 1.:
-            norm_x = x.norm(2, dim=-1, keepdim=True)
-            d_x = self.d
-        else:
-            partial_size = int(self.d * self.p)
-            partial_x, _ = torch.split(x, [partial_size, self.d - partial_size], dim=-1)
-
-            norm_x = partial_x.norm(2, dim=-1, keepdim=True)
-            d_x = partial_size
-
-        rms_x = norm_x * d_x ** (-1. / 2)
-        x_normed = x / (rms_x + self.eps)
-
-        if self.bias:
-            return self.scale * x_normed + self.offset
-
-        return self.scale * x_normed
-
-
-
 class SoftTrade(nn.Module):
     def __init__(self, hidden_size, num_levels):
         super().__init__()
@@ -137,7 +99,7 @@ class SGConvConfig(PretrainedConfig):
 class SGConvBlock(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.attn_norm = RMSNorm(config.n_embd)
+        self.attn_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         self.attn_layer = MHA(
             embed_dim = config.n_embd,
             num_heads = config.n_head,
@@ -150,7 +112,7 @@ class SGConvBlock(nn.Module):
             use_flash_attn = True,
         )
         
-        self.ff_prenorm = RMSNorm(config.n_embd)
+        self.ff_prenorm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
 
         self.use_swiglu = config.use_swiglu
         if config.use_swiglu:
@@ -204,7 +166,7 @@ class SGConvTrader(PreTrainedModel):
         self.layers = nn.ModuleList([
             SGConvBlock(config) for i in range(n_layer)
         ])
-        self.final_norm = RMSNorm(config.n_embd)
+        self.final_norm = nn.LayerNorm(config.n_embd, elementwise_affine = False)
         
         self.trade = SoftTrade(config.n_embd, config.num_levels)
         self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
