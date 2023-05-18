@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
 from flash_attn.modules.mha import MHA
+from robust_loss import NCEandRCE
 
 import math
 import numpy as np
@@ -171,7 +172,8 @@ class Trader(PreTrainedModel):
         self.trade = SoftTrade(config.n_embd, config.num_levels)
         self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
 
-        self.classification_loss = nn.CrossEntropyLoss()
+        # self.classification_loss = nn.CrossEntropyLoss()
+        self.classification_loss = NCEandRCE(alpha = 1, beta = 1, num_classes = num_classes)
 
 
     def _init_weights(self, module):
@@ -223,11 +225,12 @@ class Trader(PreTrainedModel):
 
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
-        classes = torch.where(overnight_masks.long() != 1, classes, -100)
+        # classes = torch.where(overnight_masks.long() != 1, classes, -100)
         class_loss = self.classification_loss(
             logits.reshape(-1, num_classes),
             classes.long().reshape(-1)
         )
+        class_loss = torch.where(overnight_masks.reshape(-1) != 1, class_loss, 0).mean()
     
         loss = trade_loss + class_loss
 
