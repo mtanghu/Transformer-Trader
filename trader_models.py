@@ -4,7 +4,6 @@ import torch.nn.functional as F
 from transformers import PretrainedConfig, PreTrainedModel
 
 from flash_attn.modules.mha import MHA
-from robust_loss import NCEandRCE
 
 import math
 import numpy as np
@@ -72,9 +71,14 @@ class SoftTrade(nn.Module):
         logits = self.proj_logits(mod).reshape(
             batch_size, length, num_periods, self.num_levels
         )
-        probas = F.softmax(logits, dim = -1)
+        trade_amount = torch.sigmoid(logits)
+        trade_levels = trade_amount * self.linspace
+
+        profitable_trades = torch.where(trade_amount > .9, 0, trade_levels)
+        max_profitable_trade = torch.argmax(profitable_trades.abs(), dim = -1, keepdim = True)
+        soft_trade = profitable_trades.gather(dim = -1, index = max_profitable_trade)
         
-        return (probas * self.linspace).sum(dim = -1)
+        return trade_levels, soft_trade.squeeze(-1)
 
 
 
@@ -172,8 +176,7 @@ class Trader(PreTrainedModel):
         self.trade = SoftTrade(config.n_embd, config.num_levels)
         self.logits = nn.Linear(config.n_embd, num_periods * num_classes)
 
-        # self.classification_loss = nn.CrossEntropyLoss()
-        self.classification_loss = NCEandRCE(alpha = 1, beta = 1, num_classes = num_classes)
+        self.classification_loss = nn.CrossEntropyLoss()
 
 
     def _init_weights(self, module):
@@ -192,47 +195,51 @@ class Trader(PreTrainedModel):
         # standard for modern transformers
         # hidden = self.final_norm(hidden)
         
-        soft_trade = self.trade(hidden)
+        trade_levels, soft_trade = self.trade(hidden)
         
         if future is None:
             return soft_trade
         
-        # clean up soft trades to get rid of overnight trades
-        if overnight_masks is not None:
-            mask = torch.where(overnight_masks.long() != 1, 1, 0)
-            soft_trade = soft_trade * mask
-        
-        soft_profit = soft_trade * future
+        # decrease the leverage
+        future = future / 4
+
+        ### calculate trade loss ###
+        trade_profits = trade_levels * future.unsqueeze(-1)
 
         # floor losses (so that the log can operate correctly), notice detach
         floor_mask = torch.where(
-            soft_profit > -self.max_loss, 1, -self.max_loss / soft_profit.detach()
+            trade_profits > -self.max_loss, 1, -self.max_loss / trade_profits.detach()
         )
         
         # also ceiling the gains for symmetry
         ceiling_mask =  torch.where(
-            soft_profit < self.max_loss, 1, self.max_loss / soft_profit.detach()
+            trade_profits < self.max_loss, 1, self.max_loss / trade_profits.detach()
         )
         
         # apply mask(s)
-        capped_profit = soft_profit * floor_mask * ceiling_mask        
+        capped_profit = trade_profits * floor_mask * ceiling_mask        
         
         # apply commission fee to floored profit
-        capped_profit = capped_profit - soft_trade.abs() * self.commission
+        capped_profit = capped_profit - trade_levels.abs() * self.commission
         
         # negative log return loss function (i.e. growth maximization) 
         trade_loss = -torch.log1p(capped_profit).mean()
 
         # classification loss (to help with price distribution learning)
         logits = self.logits(hidden)
-        # classes = torch.where(overnight_masks.long() != 1, classes, -100)
+        classes = torch.where(overnight_masks.long() != 1, classes, -100)
         class_loss = self.classification_loss(
             logits.reshape(-1, num_classes),
             classes.long().reshape(-1)
         )
-        class_loss = torch.where(overnight_masks.reshape(-1) != 1, class_loss, 0).mean()
     
         loss = trade_loss + class_loss
+
+        # clean up soft trades to get rid of overnight trades
+        if overnight_masks is not None:
+            mask = torch.where(overnight_masks.long() != 1, 1, 0)
+            soft_trade = soft_trade * mask
+        soft_profit = soft_trade * future
 
         return {
             'loss': loss,
