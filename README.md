@@ -1,8 +1,8 @@
 # Transformer Trading
-This project tries the simple idea of applying Transformers and self-supervised learning to financial markets end-to-end, particularly the price data of Forex markets on mid-terms time scales of minutes to hours. This README will describe at a high level how this project handled risk optimization, commissions/spread, and the general model pipeline. Also discussed are issues with many popular Forex data providers, scaling properties, and the profitability of models considered.
+This project tries the simple idea of applying Transformers and self-supervised learning to financial markets end-to-end, particularly the price data of Forex markets on mid-terms time scales of minutes to hours. This README will describe at a high level how this project handled risk optimization, commissions/spread, and the general model pipeline. Also discussed are issues with many popular Forex data providers, scaling properties, and profitability.
 
 ### Why Forex?
-1. Forex trades 24/7 and thus has a lot of data
+1. Forex trades 24/7 and thus has 3x more data compared to stocks, futures, and options that tend to only trade 9-5
 2. In general forex tends to offer leverage which can increase the profitability on low risk strategies, especially in small-scale settings where access to leverage and subsequent liquidity for the leverage is abundant
 
 ### Why mid-term time scales?
@@ -23,7 +23,7 @@ This can simply be used as the loss function for training neural networks (thoug
 
 ## Pipeline
 ### Data
-This project focused on minute level OHLCV data (since that seemed to be the only widely available data even among paid services) where OHLCV stands for Open, High, Low, Close, and Volume.
+This project focused on minute level OHLCV data (since that seemed to be the only widely available data even among paid services) where OHLCV stands for Open, High, Low, Close, and Volume. 87 currency pairs were considered (including some precious metals) totaling some ~.5 billion minutes worth of data.
 
 Using pandas some key steps were taken to get the data ready for modeling:
 - Interpolate any gaps (where no price data was reported for the minute) as most data providers would not report minutes where no volume/trades occurred
@@ -43,7 +43,7 @@ Many architectural variants were experimented with for various reasons:
 - Varying whether to use an embedding LayerNorm and/or a LayerNorm right before prediction which seemed to affect performance strongly ([RMSNorm](https://arxiv.org/abs/1910.07467) was also tried)
 - Trying a number of novel ways to calculate a continuous output for the "size" of a trade (as opposed to just using a tanh gated output) that wouldn't be biased toward trading when not necessary
 - [Rotary embeddings](https://arxiv.org/abs/2104.09864) for performance
-- Robust classification losses like Lq loss from [Zhang & Sabuncu (2018)](https://arxiv.org/pdf/1805.07836.pdf) as well as Active Passive Loss from [Ma & Huang et. al. (2020)](https://arxiv.org/abs/2006.13554) to help with the noisy nature of financial data and labels
+- Robust classification losses like Lq loss from [Zhang & Sabuncu (2018)](https://arxiv.org/pdf/1805.07836.pdf) as well as Active Passive Loss from [Ma & Huang et al. (2020)](https://arxiv.org/abs/2006.13554) to help with the noisy nature of financial data and labels
 
 fp16 mixed precision training was also used to speed up training
 
@@ -57,5 +57,24 @@ Standard metrics like loss, sharpe, profitability of trades, and average profits
 ## Results
 
 ### Data provider issues
-list the data sources tried
+This was a key challenge point of this project given that high quality data can be very hard to come by, and diagnosing that a given dataset has issues can takes months. Listed are some data providers tried and this project's experience with them:
+- Polygon, Alphavantage, and Twelvedata all had issues with basic data quality as their data would often not match up with larger data providers data that would match up (like Oanda, Forex.com, and broker data) on a minute to minute basis
+- Tradermade only offered their API with a limited amount of *total* API requests which would be prohibitively costly for both historical downloads and real-time streaming
+- broker data and Forex.com data wouldn't go far back enough historically (only went back less than a year)
+- Firstratedata offered a simple historic download, however after some extensive testing it was found that for some reason the firstratedata was *highly* predictable and thus models could achiever *extremely high levels of profit* that would not translate to other larger data providers (like Oanda, Forex.com, and broker data) even when finetuning approaches were used
+- TrueFX offered tick level data though only to about a year backwards
+- Oanda had the unfortunate issue of only reporting bid price data where bid prices naturally decrease in low volume periods of the day due to spread widening, but this kind of event is completely unprofitable
 
+Overall, a recommendation would be to use tick-level data that potentially has bid and ask level data, unfortunately this kind of data may be very hard to come by without special resources.
+
+### Scaling
+This project explored the possibility of scaling to greatly improve performance of models following from neural scaling laws research that has been shown effective in a variety of contexts from originally text ([Kaplan & McCandlish et al. 2020](https://arxiv.org/pdf/2001.08361.pdf)), then in a variety of other generative contexts ([Henighan, Kaplan, Katz, et al. , 2020](https://arxiv.org/pdf/2001.08361.pdf)), and even in reinforcement learning ([Neumann & Gros 2023](https://arxiv.org/pdf/2210.00849.pdf)). However, strange and unintuitive results would happen with scaling up both in terms of data quantity and model sizes.
+
+They can be summarized as follows:
+- Using more data would decrease training loss but not validation loss regardless of model size (for a variety of metrics and architectures and hyperparameters)
+- Larger models would not perform better than smaller models regardless of varying data size
+
+Generally speaking this would imply that scaling laws were not applying to this specific context.
+
+### Profitability
+Unfortunately after factoring in commission and removing the effects of using only bid level data, profitable strategies were not particularly found. There may be some hope for using similar ideas for market making (where commission isn't an issue) or for liquidity taking strategies, however those are outside the scope of this project.
