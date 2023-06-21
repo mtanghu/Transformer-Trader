@@ -15,7 +15,7 @@ In the context of price data, self-supervised learning refers to simply using pr
 
 ### Incorporating risk
 
-A naive approach would be to simply maximize profitability by calculating the theoretical profits and losses. However this would both ignore risk and also run into a related issue that models trained to maximize profitability would not be able to "size trade" and thus not be able to calculate appropriate levels of leverage. This can be observed simply by noticing that any trade that has a positive expected value of *x* will have a leveraged expected value of *l\*x* where *l* is the leverage multiplier, and thus maximizing the expected value of leveraged trades would simply involve setting the leverage as high as possible.
+A naive approach would be to simply maximize profitability by calculating the theoretical profits and losses. However this would both ignore risk and also run into a related issue that models trained to maximize profitability would not be able to "size trades" and thus not be able to calculate appropriate levels of leverage. This can be observed simply by noticing that any trade that has a positive expected value of *x* will have a leveraged expected value of *l\*x* where *l* is the leverage multiplier, and thus maximizing the expected value of leveraged trades would simply involve setting the leverage as high as possible.
 
 This project instead opts to maximize *growth* of possible trades which is  theoretical similar to the [Kelly Criterion](https://en.wikipedia.org/wiki/Kelly_criterion). Mathematically this can be achieved my minimizing $-ln(1+p-s*c)$ where *p* is the profit of the trade as measured by percent gained or lost, *s* is the size of the trade as measured by percent of maximum leveraged capital staked , and *c* is the percent commission + approximate spread per unit of size (this project usually assumed a .002% commission and around .005% commission based on EURUSD trading costs of popular online brokers). The reasons and motivations are too low level to be discussed here, but in general this encodes "risk aversion" while being grounded in growth theory.
 
@@ -41,7 +41,7 @@ Many architectural variants were experimented with for various reasons:
 - [SwiGLU](https://arxiv.org/abs/2002.05202v1) seemed to improve performance in a variety of settings
 - Getting rid of linear biases for speed as suggest by [Geiping & Goldstein (2022)](https://arxiv.org/abs/2002.05202v1)
 - Varying whether to use an embedding LayerNorm and/or a LayerNorm right before prediction which seemed to affect performance strongly ([RMSNorm](https://arxiv.org/abs/1910.07467) was also tried)
-- Trying a number of novel ways to calculate a continuous output for the "size" of a trade (as opposed to just using a tanh gated output) that wouldn't be biased toward trading when not necessary
+- Trying a number of novel ways to calculate a continuous output for the "size" of a trade (as opposed to just using a tanh gated output) that wouldn't necessarily have high gradient around 0
 - [Rotary embeddings](https://arxiv.org/abs/2104.09864) for performance
 - Robust classification losses like Lq loss from [Zhang & Sabuncu (2018)](https://arxiv.org/pdf/1805.07836.pdf) as well as Active Passive Loss from [Ma & Huang et al. (2020)](https://arxiv.org/abs/2006.13554) to help with the noisy nature of financial data and labels
 
@@ -57,11 +57,11 @@ Standard metrics like loss, sharpe, profitability of trades, and average profits
 ## Results
 
 ### Data provider issues
-This was a key challenge point of this project given that high quality data can be very hard to come by, and diagnosing that a given dataset has issues can takes months. Listed are some data providers tried and this project's experience with them:
+This was a key challenge point of this project given that high quality data can be very hard to come by, and diagnosing that a given dataset has issues isn't well defined. Listed are some data providers tried and this project's experience with them:
 - Polygon, Alphavantage, and Twelvedata all had issues with basic data quality as their data would often not match up with larger data providers data that would match up (like Oanda, Forex.com, and broker data) on a minute to minute basis
 - Tradermade only offered their API with a limited amount of *total* API requests which would be prohibitively costly for both historical downloads and real-time streaming
 - broker data and Forex.com data wouldn't go far back enough historically (only went back less than a year)
-- Firstratedata offered a simple historic download, however after some extensive testing it was found that for some reason the firstratedata was *highly* predictable and thus models could achiever *extremely high levels of profit* that would not translate to other larger data providers (like Oanda, Forex.com, and broker data) even when finetuning approaches were used
+- Firstratedata offered a simple historic download, however after some extensive testing it was found that for some reason the Firstratedata was *highly* predictable and thus models could achiever *extremely high levels of profit* that would not translate to other larger data providers (like Oanda, Forex.com, and broker data) even when finetuning approaches were used
 - TrueFX offered tick level data though only to about a year backwards
 - Oanda had the unfortunate issue of only reporting bid price data where bid prices naturally decrease in low volume periods of the day due to spread widening, but this kind of event is completely unprofitable
 
@@ -72,7 +72,7 @@ This project explored the possibility of scaling to greatly improve performance 
 
 They can be summarized as follows:
 - Using more data would decrease training loss but not validation loss regardless of model size (for a variety of metrics and architectures and hyperparameters)
-- Larger models would not perform better than smaller models regardless of varying data size
+- Larger models would not perform better than smaller models regardless of varying data size and would often diverge
 
 Generally speaking this would imply that scaling laws were not applying to this specific context.
 
